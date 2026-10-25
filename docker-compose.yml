@@ -1,5 +1,16 @@
 name: distributed-wagering
 
+x-app-environment: &app-environment
+  DATABASE_URL: postgresql://wagering_app:wagering_app@postgres:5432/wagering
+  MIGRATION_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/wagering
+  AWS_ENDPOINT_URL: http://ministack:4566
+  AWS_REGION: us-east-1
+  AWS_ACCESS_KEY_ID: local
+  AWS_SECRET_ACCESS_KEY: local
+  WAGER_QUEUE_URL: http://ministack:4566/000000000000/wager-transactions.fifo
+  EVENTS_QUEUE_URL: http://ministack:4566/000000000000/wagering-events.fifo
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4318
+
 services:
   postgres:
     image: postgres:17.6-alpine
@@ -31,3 +42,40 @@ services:
       interval: 2s
       timeout: 2s
       retries: 20
+
+  migrate:
+    profiles: ["app"]
+    build:
+      context: .
+      target: dependencies
+    command: ["bun", "run", "src/infrastructure/database/migrate.ts", "up"]
+    volumes:
+      - .:/app
+      - /app/node_modules
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/wagering
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  app:
+    profiles: ["app"]
+    build: .
+    deploy:
+      replicas: 3
+    environment:
+      <<: *app-environment
+      APP_ROLES: api,consumer,outbox,scheduler
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      ministack:
+        condition: service_healthy
+
+  otel-lgtm:
+    profiles: ["observability"]
+    image: grafana/otel-lgtm:0.11.10
+    ports:
+      - "3001:3000"
+      - "4317:4317"
+      - "4318:4318"
