@@ -11,6 +11,7 @@ import {
   Req,
   Res,
 } from "@nestjs/common";
+import { ApiBody, ApiHeader, ApiOperation, ApiParam, ApiResponse, ApiTags } from "@nestjs/swagger";
 import type { Response } from "express";
 import { MikroORM } from "@mikro-orm/postgresql";
 import { z } from "zod";
@@ -25,6 +26,8 @@ import {
   WagerTransactionKind,
   WagerTransactionStatus,
 } from "../domain/wager-transaction.js";
+import { moneySchema, problemDetailsSchema, zodToOpenApi } from "../../../shared/http/openapi.js";
+import { processWagerResultSchema, wagerTransactionSchema } from "./wagering.openapi.js";
 
 const wagerSchema = z
   .strictObject({
@@ -41,9 +44,11 @@ const wagerSchema = z
       WagerTransactionKind.Refund,
       WagerTransactionKind.Rollback,
     ]),
-    money: z.strictObject({
-      amount: z.string().regex(/^(0|[1-9]\d*)\.\d{2}$/),
-      currency: z.string().regex(/^[A-Z]{3}$/),
+    money: moneySchema.extend({
+      amount: moneySchema.shape.amount.meta({
+        description: "Decimal string with two fraction digits; must be > 0.00 unless kind is LOSS",
+        example: "10.00",
+      }),
     }),
     referenceExternalTransactionId: z.string().trim().min(1).max(128).optional(),
   })
@@ -56,6 +61,7 @@ interface RequestWithId {
   id: string;
 }
 
+@ApiTags("wagering")
 @Controller()
 export class WageringController {
   constructor(
@@ -65,6 +71,44 @@ export class WageringController {
 
   @Post("wagering/transactions")
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: "Process a provider wager transaction (idempotent)" })
+  @ApiHeader({
+    name: "Idempotency-Key",
+    required: true,
+    description: "At most 255 characters; replays return the original result",
+  })
+  @ApiHeader({ name: "traceparent", required: false, description: "W3C trace context" })
+  @ApiBody({ schema: zodToOpenApi(wagerSchema) })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: "Processed, or idempotent replay of a previous delivery",
+    schema: processWagerResultSchema,
+  })
+  @ApiResponse({
+    status: HttpStatus.ACCEPTED,
+    description: "Waiting for the referenced transaction to arrive (PENDING_REFERENCE)",
+    schema: processWagerResultSchema,
+  })
+  @ApiResponse({
+    status: HttpStatus.UNPROCESSABLE_ENTITY,
+    description: "Rejected by a business rule (e.g. insufficient funds)",
+    schema: processWagerResultSchema,
+  })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description: "Invalid payload or headers",
+    schema: problemDetailsSchema,
+  })
+  @ApiResponse({
+    status: HttpStatus.NOT_FOUND,
+    description: "Wallet not found",
+    schema: problemDetailsSchema,
+  })
+  @ApiResponse({
+    status: HttpStatus.CONFLICT,
+    description: "Same idempotency key reused with a different payload",
+    schema: problemDetailsSchema,
+  })
   async create(
     @Body() body: unknown,
     @Headers("idempotency-key") idempotencyKey: string | undefined,
@@ -109,11 +153,21 @@ export class WageringController {
   }
 
   @Get("wagering/transactions/:transactionId")
+  @ApiOperation({ summary: "Get a wager transaction by its internal id" })
+  @ApiParam({ name: "transactionId", format: "uuid" })
+  @ApiResponse({ status: HttpStatus.OK, schema: wagerTransactionSchema })
+  @ApiResponse({ status: HttpStatus.BAD_REQUEST, schema: problemDetailsSchema })
+  @ApiResponse({ status: HttpStatus.NOT_FOUND, schema: problemDetailsSchema })
   async getById(@Param("transactionId") transactionId: string): Promise<Record<string, unknown>> {
     return this.findOne({ id: z.uuid().parse(transactionId) });
   }
 
   @Get("providers/:providerId/wagering/transactions/:externalTransactionId")
+  @ApiOperation({ summary: "Get a wager transaction by provider and external id" })
+  @ApiParam({ name: "providerId" })
+  @ApiParam({ name: "externalTransactionId" })
+  @ApiResponse({ status: HttpStatus.OK, schema: wagerTransactionSchema })
+  @ApiResponse({ status: HttpStatus.NOT_FOUND, schema: problemDetailsSchema })
   async getByExternal(
     @Param("providerId") providerId: string,
     @Param("externalTransactionId") externalTransactionId: string,

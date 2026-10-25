@@ -1,7 +1,9 @@
 import { Controller, Get, ServiceUnavailableException } from "@nestjs/common";
+import { ApiOperation, ApiTags } from "@nestjs/swagger";
 import { MikroORM } from "@mikro-orm/postgresql";
 import { SqsService } from "./infrastructure/sqs/sqs.service.js";
 
+@ApiTags("health")
 @Controller("health")
 export class HealthController {
   constructor(
@@ -10,11 +12,13 @@ export class HealthController {
   ) {}
 
   @Get("live")
+  @ApiOperation({ summary: "Liveness probe" })
   live(): { status: "ok" } {
     return { status: "ok" };
   }
 
   @Get("ready")
+  @ApiOperation({ summary: "Readiness probe (PostgreSQL and SQS)" })
   async ready(): Promise<{ status: "ok"; dependencies: { postgres: "up"; sqs: "up" } }> {
     try {
       await this.orm.em.getConnection().execute("select 1");

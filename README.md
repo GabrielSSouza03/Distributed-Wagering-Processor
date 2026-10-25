@@ -165,6 +165,8 @@ Valores abaixo são os do ambiente local. Não são segredos de produção. O `.
 
 Sem autenticação. Os exemplos assumem `http://localhost:3000`. Status HTTP, hash do payload e códigos de falha estão em [ARCHITECTURE.md](ARCHITECTURE.md).
 
+A documentação OpenAPI fica em [`/docs`](http://localhost:3000/docs) (Swagger UI) e [`/docs-json`](http://localhost:3000/docs-json). Os schemas de request são gerados a partir dos mesmos schemas Zod que validam as requisições, então a documentação não diverge da validação.
+
 Erros lançados antes de um resultado de negócio usam este corpo, com `Content-Type: application/json`:
 
 ```json

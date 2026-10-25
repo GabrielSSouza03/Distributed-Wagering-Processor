@@ -3,21 +3,29 @@ import {
   Controller,
   Get,
   Headers,
+  HttpStatus,
   NotFoundException,
   Param,
   Post,
   Query,
   Req,
 } from "@nestjs/common";
+import {
+  ApiBody,
+  ApiHeader,
+  ApiOperation,
+  ApiParam,
+  ApiQuery,
+  ApiResponse,
+  ApiTags,
+} from "@nestjs/swagger";
 import { MikroORM } from "@mikro-orm/postgresql";
 import { z } from "zod";
 import { WalletLedgerEntryRecord, WalletRecord } from "../../../infrastructure/database/records.js";
+import { moneySchema, problemDetailsSchema, zodToOpenApi } from "../../../shared/http/openapi.js";
 import { CreateWallet, type CreateWalletResult } from "../application/create-wallet.js";
+import { ledgerPageSchema, reconciliationSchema, walletSchema } from "./wallet.openapi.js";
 
-const moneySchema = z.strictObject({
-  amount: z.string().regex(/^(0|[1-9]\d*)\.\d{2}$/),
-  currency: z.string().regex(/^[A-Z]{3}$/),
-});
 const createWalletSchema = z.strictObject({
   playerId: z.uuid(),
   initialBalance: moneySchema,
@@ -28,6 +36,7 @@ interface RequestWithId {
   headers: Record<string, string | string[] | undefined>;
 }
 
+@ApiTags("wallets")
 @Controller("wallets")
 export class WalletController {
   constructor(
@@ -36,6 +45,11 @@ export class WalletController {
   ) {}
 
   @Post()
+  @ApiOperation({ summary: "Create a wallet with an opening balance" })
+  @ApiHeader({ name: "traceparent", required: false, description: "W3C trace context" })
+  @ApiBody({ schema: zodToOpenApi(createWalletSchema) })
+  @ApiResponse({ status: HttpStatus.CREATED, schema: walletSchema })
+  @ApiResponse({ status: HttpStatus.BAD_REQUEST, schema: problemDetailsSchema })
   async create(
     @Body() body: unknown,
     @Req() request: RequestWithId,
@@ -50,6 +64,11 @@ export class WalletController {
   }
 
   @Get(":walletId")
+  @ApiOperation({ summary: "Get a wallet and its current balance" })
+  @ApiParam({ name: "walletId", format: "uuid" })
+  @ApiResponse({ status: HttpStatus.OK, schema: walletSchema })
+  @ApiResponse({ status: HttpStatus.BAD_REQUEST, schema: problemDetailsSchema })
+  @ApiResponse({ status: HttpStatus.NOT_FOUND, schema: problemDetailsSchema })
   async get(@Param("walletId") walletId: string): Promise<Record<string, unknown>> {
     const record = await this.orm.em.fork().findOne(WalletRecord, { id: z.uuid().parse(walletId) });
     if (!record) throw new NotFoundException("Wallet not found");
@@ -62,6 +81,16 @@ export class WalletController {
   }
 
   @Get(":walletId/ledger")
+  @ApiOperation({ summary: "List ledger entries in sequence order (cursor pagination)" })
+  @ApiParam({ name: "walletId", format: "uuid" })
+  @ApiQuery({ name: "cursor", required: false, description: "nextCursor from the previous page" })
+  @ApiQuery({
+    name: "limit",
+    required: false,
+    schema: { type: "integer", minimum: 1, maximum: 100, default: 50 },
+  })
+  @ApiResponse({ status: HttpStatus.OK, schema: ledgerPageSchema })
+  @ApiResponse({ status: HttpStatus.BAD_REQUEST, schema: problemDetailsSchema })
   async ledger(
     @Param("walletId") walletId: string,
     @Query("cursor") cursor?: string,
@@ -96,6 +125,11 @@ export class WalletController {
   }
 
   @Post(":walletId/reconciliation")
+  @ApiOperation({ summary: "Compare the stored balance with the sum of ledger entries" })
+  @ApiParam({ name: "walletId", format: "uuid" })
+  @ApiResponse({ status: HttpStatus.CREATED, schema: reconciliationSchema })
+  @ApiResponse({ status: HttpStatus.BAD_REQUEST, schema: problemDetailsSchema })
+  @ApiResponse({ status: HttpStatus.NOT_FOUND, schema: problemDetailsSchema })
   async reconcile(@Param("walletId") walletId: string): Promise<Record<string, unknown>> {
     const id = z.uuid().parse(walletId);
     const [result] = await this.orm.em

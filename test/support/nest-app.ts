@@ -1,6 +1,7 @@
 import type { INestApplication } from "@nestjs/common";
 import { HttpAdapterHost, NestFactory } from "@nestjs/core";
 import { AppModule } from "../../src/app.module.js";
+import { setupOpenApi } from "../../src/openapi.js";
 import { ProblemDetailsFilter } from "../../src/problem-details.filter.js";
 import { APP_DATABASE_URL } from "./db.js";
 import { AWS_ENDPOINT_URL } from "./queues.js";
@@ -12,6 +13,7 @@ export async function startInProcessApi(port: number): Promise<INestApplication>
   process.env.AWS_ENDPOINT_URL = AWS_ENDPOINT_URL;
   const app = await NestFactory.create(AppModule, { logger: false });
   app.useGlobalFilters(new ProblemDetailsFilter(app.get(HttpAdapterHost)));
+  setupOpenApi(app);
   await app.listen(port, "127.0.0.1");
   return app;
 }

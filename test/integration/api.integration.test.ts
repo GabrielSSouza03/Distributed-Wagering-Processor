@@ -90,6 +90,40 @@ describe("financial integration with real PostgreSQL", () => {
   });
 });
 
+describe("OpenAPI document", () => {
+  test("exposes the Zod-derived contract at /docs-json and the UI at /docs", async () => {
+    const response = await fetch(`${baseUrl}/docs-json`);
+    expect(response.status).toBe(200);
+    const document = (await response.json()) as {
+      paths: Record<
+        string,
+        Record<
+          string,
+          {
+            requestBody?: {
+              content: Record<
+                string,
+                { schema: { required?: string[]; additionalProperties?: boolean } }
+              >;
+            };
+          }
+        >
+      >;
+    };
+    expect(Object.keys(document.paths)).toContain("/wagering/transactions");
+    expect(Object.keys(document.paths)).toContain("/wallets/{walletId}/ledger");
+    const wagerBody =
+      document.paths["/wagering/transactions"]?.post?.requestBody?.content["application/json"]
+        ?.schema;
+    expect(wagerBody?.additionalProperties).toBe(false);
+    expect(wagerBody?.required).toContain("externalTransactionId");
+    expect(wagerBody?.required).toContain("money");
+
+    const ui = await fetch(`${baseUrl}/docs`);
+    expect(ui.status).toBe(200);
+  });
+});
+
 async function createWallet(
   playerId: string,
   amount: string,
