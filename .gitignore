@@ -1,0 +1,11 @@
+.cursor/
+.env
+.env.*
+!.env.example
+node_modules/
+dist/
+coverage/
+.DS_Store
+*.log
+load-results/
+.snapshot-wagering.json
