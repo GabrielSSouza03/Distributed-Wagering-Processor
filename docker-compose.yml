@@ -1,0 +1,33 @@
+name: distributed-wagering
+
+services:
+  postgres:
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_DB: wagering
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d wagering"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+    tmpfs:
+      - /var/lib/postgresql/data
+
+  ministack:
+    image: ministackorg/ministack@sha256:2669fc88f0669624a58af35ee1a4c8f4e2eb5db29dac0988dddd43ce447e701f
+    ports:
+      - "4566:4566"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:4566/health')",
+        ]
+      interval: 2s
+      timeout: 2s
+      retries: 20
